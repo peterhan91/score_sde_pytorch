@@ -182,6 +182,7 @@ def get_projection_sampler(config, sde, shape, predictor, corrector,
         output_space = to_space(output)
         output_space = merge_known_with_mask(config, output_space, known, mask, 1.)
         output = from_space(output_space)
-      return inverse_scaler(output)
+      
+      return inverse_scaler(output), mask.cpu().detach().numpy(), inverse_scaler(from_space(known)).cpu().detach().numpy()
 
   return projection_sampler

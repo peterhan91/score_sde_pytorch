@@ -29,7 +29,9 @@ def eval_sample(config, workdir, ckpt_name, eval_folder="eval", mar=False):
   """
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
-  tf.io.gfile.makedirs(eval_dir)
+  tf.io.gfile.makedirs(os.path.join(eval_dir, 'y_true'))
+  tf.io.gfile.makedirs(os.path.join(eval_dir, 'y_pred'))
+  tf.io.gfile.makedirs(os.path.join(eval_dir, 'total'))
 
   # Build data pipeline
   train_ds, eval_ds, _ = datasets.get_dataset(config,
@@ -80,9 +82,9 @@ def eval_sample(config, workdir, ckpt_name, eval_folder="eval", mar=False):
   }[config.sampling.cs_solver]
 
   all_samples = []
-  imgs = []
-  undersamples = []
-  masks = []
+  all_imgs = []
+  all_undersamples = []
+  all_masks = []
   
   eval_iter = iter(eval_ds) 
   for r, batch in tqdm.tqdm(enumerate(eval_iter)):
@@ -95,15 +97,38 @@ def eval_sample(config, workdir, ckpt_name, eval_folder="eval", mar=False):
     else:
       raise NotImplementedError("task unknown.")
 
-    samples = cs_solver(score_model, img, *hyper_params) # masks generated inside the cs_solver
+    samples, mask, unders = cs_solver(score_model, img, *hyper_params) # masks generated inside the cs_solver
+    
     samples = np.clip(np.asarray(samples), 0., 1.)
     samples = samples.reshape((-1, config.data.image_size, config.data.image_size, 1))
-    
+    unders = np.clip(np.asarray(unders), 0., 1.)
+    unders = unders.reshape((-1, config.data.image_size, config.data.image_size, 1))
+    img = inverse_scaler(img).cpu().detach().numpy()
+    img = np.clip(np.asarray(img), 0., 1.)
+    img = img.reshape((-1, config.data.image_size, config.data.image_size, 1))
+    mask = mask.reshape((-1, config.data.image_size, config.data.image_size, 1))
+
     all_samples.extend(samples)
-    imgs.extend(img)
+    all_imgs.extend(img)
+    all_masks.extend(mask)
+    all_undersamples.extend(unders)
+
   
-  for sample in all_samples:
+  for n in range(len(all_samples)):
     # save original, undersampled, reconstructed imgs, and mask
     # also, save original and reconstructed into seperate folder for PSNR and SSIM computation
-    sample  = np.clip(np.rint(sample * 255.0), 0.0, 255.0).astype(np.uint8) # [-1,1] => [0,255]
-    imageio.imwrite(os.path.join())
+    sample = all_samples[n]
+    sample  = np.clip(np.rint(sample * 255.0), 0.0, 255.0).astype(np.uint8).squeeze() # [-1,1] => [0,255]
+    img = all_imgs[n]
+    img = np.clip(np.rint(img * 255.0), 0.0, 255.0).astype(np.uint8).squeeze()
+    
+    imageio.imwrite(os.path.join(eval_dir, 'y_true', str(n)+'.jpg'))
+    imageio.imwrite(os.path.join(eval_dir, 'y_pred', str(n)+'.jpg'))
+
+    mask = all_masks[n]
+    mask = np.clip(np.rint(mask * 255.0), 0.0, 255.0).astype(np.uint8).squeeze()
+    undersampled = all_undersamples[n]
+    undersampled = np.clip(np.rint(undersampled * 255.0), 0.0, 255.0).astype(np.uint8).squeeze()
+    total = np.hstack((mask, undersampled, sample, img))
+    
+    imageio.imwrite(os.path.join(eval_dir, 'total', str(n)+'.jpg'), total)
